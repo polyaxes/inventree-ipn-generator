@@ -382,6 +382,100 @@ class IPNGeneratorCombiningTests(TestCase):
         self.assertEqual(part.IPN, "a26")
 
 
+class IPNGeneratorRandomTests(TestCase):
+    """Tests for the <R...> random group"""
+
+    def setUp(self):
+        setup_func(self)
+
+    def tearDown(self):
+        teardown_func()
+
+    def test_random_pattern_valid(self):
+        """<R6> alone is a valid pattern"""
+        try:
+            self.plugin.set_setting("PATTERN", "<R6>")
+        except ValidationError:
+            self.fail("Valid random pattern <R6> raised a ValidationError")
+
+    def test_random_pattern_with_prefix_valid(self):
+        """Random can be combined with a literal prefix"""
+        try:
+            self.plugin.set_setting("PATTERN", "(POL-)<R6>")
+        except ValidationError:
+            self.fail("Valid random pattern (POL-)<R6> raised a ValidationError")
+
+    def test_random_pattern_zero_length_invalid(self):
+        """<R0> must be rejected (no zero-digit numbers)"""
+        with self.assertRaises(ValidationError):
+            self.plugin.set_setting("PATTERN", "<R0>")
+
+    def test_random_pattern_bad_letter_invalid(self):
+        """<X6> uses the wrong letter and must be rejected"""
+        with self.assertRaises(ValidationError):
+            self.plugin.set_setting("PATTERN", "<X6>")
+
+    def test_random_only_literals_invalid(self):
+        """Random group is needed to satisfy 'more than literals' too"""
+        # Sanity: literals + nothing else still fails
+        with self.assertRaises(ValidationError):
+            self.plugin.set_setting("PATTERN", "(POL-)")
+
+    def test_random_generates_correct_length(self):
+        """A <R6> pattern should produce a 6-digit IPN with no leading zero"""
+        self.plugin.set_setting("PATTERN", "<R6>")
+
+        cat = PartCategory.objects.all().first()
+        new_part = Part.objects.create(category=cat, name="PartName")
+
+        part = Part.objects.get(pk=new_part.pk)
+        self.assertIsNotNone(part.IPN)
+        self.assertEqual(len(part.IPN), 6)
+        self.assertTrue(part.IPN.isdigit())
+        self.assertNotEqual(part.IPN[0], "0")
+
+    def test_random_with_prefix(self):
+        """(POL-)<R6> should produce POL- + 6 digits"""
+        self.plugin.set_setting("PATTERN", "(POL-)<R6>")
+
+        cat = PartCategory.objects.all().first()
+        new_part = Part.objects.create(category=cat, name="PartName")
+
+        part = Part.objects.get(pk=new_part.pk)
+        self.assertIsNotNone(part.IPN)
+        self.assertTrue(part.IPN.startswith("POL-"))
+        self.assertEqual(len(part.IPN), 10)
+        self.assertTrue(part.IPN[4:].isdigit())
+
+    def test_random_uniqueness_across_many_parts(self):
+        """Generating many parts should not produce duplicates"""
+        self.plugin.set_setting("PATTERN", "<R6>")
+
+        cat = PartCategory.objects.all().first()
+        ipns = set()
+        for _ in range(20):
+            p = Part.objects.create(category=cat, name="PartName")
+            part = Part.objects.get(pk=p.pk)
+            self.assertIsNotNone(part.IPN)
+            ipns.add(part.IPN)
+
+        self.assertEqual(len(ipns), 20)
+
+    def test_random_collision_retry(self):
+        """If a draw collides with an existing IPN, the plugin should retry"""
+        self.plugin.set_setting("PATTERN", "<R1>")
+
+        cat = PartCategory.objects.all().first()
+        # Pre-fill 8 of the 9 possible 1-digit IPNs (1..8)
+        for digit in "12345678":
+            Part.objects.create(category=cat, name="PartName", IPN=digit)
+
+        p = Part.objects.create(category=cat, name="PartName")
+        part = Part.objects.get(pk=p.pk)
+        # Only "9" is left available
+        self.assertEqual(part.IPN, "9")
+
+
 class IPNGeneratorModelTests(TestCase):
     """Verify model behaviours"""
 

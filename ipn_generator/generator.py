@@ -5,32 +5,52 @@ from part.models import Part
 from django.core.exceptions import ValidationError
 
 import logging
+import random
 import re
 
 logger = logging.getLogger("inventree")
 
 PERMITTED_SPECIAL_LITERALS = "\-.:/\\"
 
+# Master regex for splitting a pattern into its 4 group kinds.
+# Order matters in `findall` results: numeric, literal, character, random.
+GROUP_REGEX = (
+    r"(\{\d+\+?\})"
+    r"|(\([\w\(\)\-.:/\\]+\))"
+    r"|(\[(?:\w+|\w-\w)+\])"
+    r"|(<R[1-9]\d*>)"
+)
+
+# Max attempts when looking for a non-colliding random IPN before giving up.
+RANDOM_IPN_MAX_RETRIES = 100
+
 
 def validate_pattern(pattern):
     """Validates pattern groups"""
-    regex = re.compile(r"(\{\d+\+?\})|(\[(?!\w\])(?:\w+|(?:\w-\w)+)+\])")
+    regex = re.compile(
+        r"(\{\d+\+?\})|(\[(?!\w\])(?:\w+|(?:\w-\w)+)+\])|(<R[1-9]\d*>)"
+    )
     if not regex.search(pattern):
         raise ValidationError("Pattern must include more than Literals")
 
     return True
 
 
+def pattern_has_random(pattern):
+    """True if pattern contains at least one random group like <R6>."""
+    return bool(re.search(r"<R[1-9]\d*>", pattern))
+
+
 class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
     """Plugin to generate IPN automatically"""
 
-    AUTHOR = "Nichlas W."
+    AUTHOR = "Nichlas W. (fork: Polyaxes)"
     DESCRIPTION = (
         "Plugin for automatically assigning IPN to parts created with empty IPN fields.\
         IPN pattern syntax can be found on the website linked here."
     )
-    VERSION = "0.1"
-    WEBSITE = "https://github.com/LavissaWoW/inventree-ipn-generator"
+    VERSION = "0.2.0"
+    WEBSITE = "https://github.com/polyaxes/inventree-ipn-generator"
 
     NAME = "IPNGenerator"
     SLUG = "ipngen"
@@ -100,6 +120,15 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
         if part.IPN:
             return
 
+        pattern = self.get_setting("PATTERN")
+
+        # Random patterns short-circuit the find-latest-then-increment flow:
+        # there's no monotonic order, so we draw + check uniqueness instead.
+        if pattern_has_random(pattern):
+            part.IPN = self.generate_random_ipn()
+            part.save()
+            return
+
         expression = self.construct_regex(True)
         latest = Part.objects.filter(IPN__regex=expression).order_by("-IPN").first()
 
@@ -113,19 +142,50 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
 
         return
 
+    def generate_random_ipn(self):
+        """Generate an IPN for a pattern containing at least one random group.
+
+        Non-random mutable groups (numeric, character) are frozen at their
+        starting value — incrementing them across collisions would defeat the
+        whole point of a non-sequential identifier.
+        """
+        groups = re.findall(GROUP_REGEX, self.get_setting("PATTERN"))
+
+        for _ in range(RANDOM_IPN_MAX_RETRIES):
+            parts = []
+            for numeric, literal, character, random_g in groups:
+                if random_g:
+                    n = int(random_g.strip("<R>"))
+                    parts.append(str(random.randint(10 ** (n - 1), 10 ** n - 1)))
+                elif numeric:
+                    num = numeric.strip("{}+")
+                    if "+" in numeric:
+                        parts.append(num)
+                    else:
+                        parts.append(str(1).zfill(int(num)))
+                elif literal:
+                    parts.append(literal.strip("()"))
+                elif character:
+                    parts.append(character.strip("[]")[0])
+
+            candidate = "".join(parts)
+            if not Part.objects.filter(IPN=candidate).exists():
+                return candidate
+
+        raise ValidationError(
+            f"Could not generate a unique random IPN after {RANDOM_IPN_MAX_RETRIES} attempts"
+        )
+
     def construct_regex(self, disable_groups=False):
         """Constructs a valid regex from provided IPN pattern.
         This regex is used to find the latest assigned IPN
         """
         regex = "^"
 
-        m = re.findall(
-            r"(\{\d+\+?\})|(\([\w\(\)\-.:/\\]+\))|(\[(?:\w+|\w-\w)+\])",
-            self.get_setting("PATTERN"),
-        )
+        m = re.findall(GROUP_REGEX, self.get_setting("PATTERN"))
 
         for idx, group in enumerate(m):
-            numeric, literal, character = group
+            numeric, literal, character, random_g = group
             # Numeric, increment
             if numeric:
                 start = "+" in numeric
@@ -172,6 +232,15 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
                 if not disable_groups:
                     regex += f'{"_".join(exp).replace("-", "")}i{idx}>'
                 regex += f'[{"".join(exp)}]'
+                regex += ")"
+
+            # Random numeric group, fixed-length \d{N}
+            if random_g:
+                n = int(random_g.strip("<R>"))
+                regex += "("
+                if not disable_groups:
+                    regex += f"?P<R{n}i{idx}>"
+                regex += f"\\d{{{n}}}"
                 regex += ")"
 
         regex += "$"
@@ -249,15 +318,12 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
 
     def construct_first_ipn(self):
         """No IPNs matching the pattern were found. Constructing the first IPN."""
-        m = re.findall(
-            r"(\{\d+\+?\})|(\([\w\(\)\-.:/\\]+\))|(\[(?:\w+|(?:\w-\w)+)\])",
-            self.get_setting("PATTERN"),
-        )
+        m = re.findall(GROUP_REGEX, self.get_setting("PATTERN"))
 
         ipn = ""
 
         for group in m:
-            numeric, literal, character = group
+            numeric, literal, character, random_g = group
             if numeric:
                 num = numeric.strip("{}+")
                 if "+" in numeric:
@@ -270,5 +336,9 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
 
             if character:
                 ipn += character.strip("[]")[0]
+
+            if random_g:
+                n = int(random_g.strip("<R>"))
+                ipn += str(random.randint(10 ** (n - 1), 10 ** n - 1))
 
         return ipn
