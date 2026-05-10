@@ -49,7 +49,7 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
         "Plugin for automatically assigning IPN to parts created with empty IPN fields.\
         IPN pattern syntax can be found on the website linked here."
     )
-    VERSION = "0.2.0"
+    VERSION = "0.2.1"
     WEBSITE = "https://github.com/polyaxes/inventree-ipn-generator"
 
     NAME = "IPNGenerator"
