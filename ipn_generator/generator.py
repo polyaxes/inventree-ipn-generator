@@ -18,7 +18,7 @@ GROUP_REGEX = (
     r"(\{\d+\+?\})"
     r"|(\([\w\(\)\-.:/\\]+\))"
     r"|(\[(?:\w+|\w-\w)+\])"
-    r"|(<R[1-9]\d*>)"
+    r"|(\{R[1-9]\d*\})"
 )
 
 # Max attempts when looking for a non-colliding random IPN before giving up.
@@ -28,7 +28,7 @@ RANDOM_IPN_MAX_RETRIES = 100
 def validate_pattern(pattern):
     """Validates pattern groups"""
     regex = re.compile(
-        r"(\{\d+\+?\})|(\[(?!\w\])(?:\w+|(?:\w-\w)+)+\])|(<R[1-9]\d*>)"
+        r"(\{\d+\+?\})|(\[(?!\w\])(?:\w+|(?:\w-\w)+)+\])|(\{R[1-9]\d*\})"
     )
     if not regex.search(pattern):
         raise ValidationError("Pattern must include more than Literals")
@@ -37,8 +37,8 @@ def validate_pattern(pattern):
 
 
 def pattern_has_random(pattern):
-    """True if pattern contains at least one random group like <R6>."""
-    return bool(re.search(r"<R[1-9]\d*>", pattern))
+    """True if pattern contains at least one random group like {R6}."""
+    return bool(re.search(r"\{R[1-9]\d*\}", pattern))
 
 
 class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
@@ -155,7 +155,7 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
             parts = []
             for numeric, literal, character, random_g in groups:
                 if random_g:
-                    n = int(random_g.strip("<R>"))
+                    n = int(random_g.strip("{R}"))
                     parts.append(str(random.randint(10 ** (n - 1), 10 ** n - 1)))
                 elif numeric:
                     num = numeric.strip("{}+")
@@ -236,7 +236,7 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
 
             # Random numeric group, fixed-length \d{N}
             if random_g:
-                n = int(random_g.strip("<R>"))
+                n = int(random_g.strip("{R}"))
                 regex += "("
                 if not disable_groups:
                     regex += f"?P<R{n}i{idx}>"
@@ -338,7 +338,7 @@ class AutoGenIPNPlugin(EventMixin, SettingsMixin, InvenTreePlugin):
                 ipn += character.strip("[]")[0]
 
             if random_g:
-                n = int(random_g.strip("<R>"))
+                n = int(random_g.strip("{R}"))
                 ipn += str(random.randint(10 ** (n - 1), 10 ** n - 1))
 
         return ipn

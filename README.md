@@ -41,12 +41,10 @@ Incrementing follows this order: C2, N1, C1.
 > If your InvenTree does not allow duplicate IPNs, this will cause an error at the moment!
 > This will be addressed in an upcoming update.
 
-> **_NOTE:_** Random patterns (`<R...>`) bypass the increment flow entirely.
+> **_NOTE:_** Random patterns (`{R...}`) bypass the increment flow entirely.
 > Each new part draws a fresh random number and the plugin checks the database
 > for uniqueness before assigning. If a pattern contains any random group, other
 > mutable groups in the same pattern stay frozen at their starting value.
-> The "On Edit" setting should be left **off** for random patterns — otherwise
-> editing a part with no IPN would generate a new random each time.
 
 ### Literals (Immutable)
 Anything encased in `()` will be rendered as-is. no change will be made to anything within.
@@ -70,9 +68,10 @@ These two directives can be combined.
 - - `a`, `Q`, `c-f`
 
 ### Random
-Random fixed-length numbers should be encased in `<>` with the `R` prefix.
-- `<R6>` represents a uniformly random number between `100000` and `999999`
-- `<R7>` represents a uniformly random number between `1000000` and `9999999`
+Random fixed-length numbers use the same `{}` braces as Numerics, with an `R`
+prefix to distinguish them from incrementing numbers.
+- `{R6}` represents a uniformly random number between `100000` and `999999`
+- `{R7}` represents a uniformly random number between `1000000` and `9999999`
 
 The chosen length always produces a number with exactly that many digits — no
 leading zeros — so IPNs look uniform without padding. Each new part triggers a
@@ -85,5 +84,5 @@ random length).
 1. `(AB){3}[ab]` -> AB001a, AB001b, AB002a, AB021b, AB032a, etc
 2. `{2}[Aq](BD)` -> 01ABD, 01qBD, 02ABD, 02qBD, etc
 3. `{1}[a-d]{8+}` -> 1a8, 1a9, 1b8, 1b9, 1c8, 1c9, 1d8, 1d9, 2a8, etc
-4. `<R6>` -> 348721, 567890, 102934, etc (non-sequential)
-5. `(POL-)<R6>` -> POL-348721, POL-567890, POL-102934, etc
+4. `{R6}` -> 348721, 567890, 102934, etc (non-sequential)
+5. `(POL-){R6}` -> POL-348721, POL-567890, POL-102934, etc
